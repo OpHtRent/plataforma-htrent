@@ -96,15 +96,16 @@ const acceso = $('acceso'), app = $('app'), aviso = $('avisoAcceso');
 const VERSION = '2026-09-25b';
 
 const DESTINOS = {
-  clientes:    { nombre:'Servicio a Clientes',              url:'https://htrentinventory.github.io/seguimiento-clientes-equipo/' },
+  clientes:    { nombre:'Servicio a Clientes', url:'https://htrentinventory.github.io/seguimiento-clientes-equipo/' },
   documentos:  { nombre:'Control de equipos y expedientes', url:'documentos.html' },
-  patios:      { nombre:'Levantamiento de patios',          url:'https://htrentinventory.github.io/levantamiento-patio/' },
-  operaciones: { nombre:'Operaciones y taller',             url:null },
-  fotos:       { nombre:'Imágenes HT',                      url:'https://htrentinventory.github.io/imagenes-ht/?t=8a578d88491c462bb93198ccfa923a49' },
-  mapa_patios: { nombre:'Mapa de patios',                   url:null },
-  movimientos: { nombre:'Entradas y salidas de patio',      url:'movimientos.html' },
-  gastos:      { nombre:'Autorización de facturas',         url:'gastos.html' },
-  admin:       { nombre:'Administración',                   url:null }
+  patios:      { nombre:'Levantamiento de patios', url:'https://htrentinventory.github.io/levantamiento-patio/' },
+  operaciones: { nombre:'Operaciones y taller', url:null },
+  fotos:       { nombre:'Imágenes HT', url:'https://htrentinventory.github.io/imagenes-ht/?t=8a578d88491c462bb93198ccfa923a49' },
+  mapa_patios: { nombre:'Mapa de patios', url:null },
+  movimientos: { nombre:'Entradas y salidas de patio', url:'movimientos.html' },
+  gastos:      { nombre:'Autorización de facturas', url:'gastos.html' },
+  inventario:  { nombre:'Inventario de Operaciones', url:'inventario.html' },
+  admin:       { nombre:'Administración', url:null }
 };
 
 function mostrarAviso(txt, ok=false){
