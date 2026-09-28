@@ -255,10 +255,11 @@ async function verDetalle(s){
   } else if(s.estado==='devuelta' && mio){
     acciones = `<div class="acciones"><button class="btn" data-ac="corregir">Corregir y reenviar</button><button class="btn claro" data-ac="cancelar">Cancelar solicitud</button></div>`;
   } else if(s.estado==='autorizada'){
-    acciones = `<p class="q">Autorizada. Entra en el reporte a pagos del <b>${esc(fLargo(l.envio))}</b> para pago el <b>${esc(fLargo(l.pago))}</b>.</p>`;
+    acciones = `<p class="q">Autorizada. Entra en el reporte a pagos del <b>${esc(fLargo(l.envio))}</b> para pago el <b>${esc(fLargo(l.pago))}</b>.</p>
+      ${mio && s.tipo==='factura' ? '<div class="acciones" style="margin-top:10px"><button class="btn claro chico" data-ac="sustituir">Sustituir factura cancelada por el emisor</button></div>' : ''}`;
   } else if(t){
     acciones = `<p class="q">Turno de <b>${esc(nombreDe(t))}</b>${puestoDe(t)?`, ${esc(puestoDe(t))}`:''}.</p>
-      <div class="acciones" style="margin-top:10px"><button class="btn claro chico" data-ac="recordar">Copiar recordatorio</button>${mio&&s.estado==='en_proceso'?'<button class="btn claro chico" data-ac="cancelar">Cancelar solicitud</button>':''}</div>`;
+      <div class="acciones" style="margin-top:10px"><button class="btn claro chico" data-ac="recordar">Copiar recordatorio</button>${mio&&s.estado==='en_proceso'&&s.tipo==='factura'?'<button class="btn claro chico" data-ac="sustituir">Sustituir factura cancelada por el emisor</button>':''}${mio&&s.estado==='en_proceso'?'<button class="btn claro chico" data-ac="cancelar">Cancelar solicitud</button>':''}</div>`;
   } else {
     acciones = `<p class="q">Solicitud ${ESTADOS[s.estado].toLowerCase()}.</p>`;
   }
@@ -337,7 +338,7 @@ async function validarNivs(nivs){
 }
 
 /* ---------------- formulario ---------------- */
-let tipoForm='factura', editando=null, xmlDatos=null, archivos={pdf:null,xml:null,xmlTexto:null};
+let tipoForm='factura', editando=null, sustituyendo=false, xmlDatos=null, archivos={pdf:null,xml:null,xmlTexto:null};
 
 function nuevaSolicitud(src){
   editando = src || null;
@@ -346,7 +347,8 @@ function nuevaSolicitud(src){
   const s = src || {};
   if(src) xmlDatos = src.xml_datos || null;
   estado.abierto = {tipo:'forma'};
-  $('panelTitulo').textContent = editando ? `Corregir ${editando.folio}` : 'Nueva solicitud';
+  if(!editando) sustituyendo = false;
+  $('panelTitulo').textContent = sustituyendo ? `Sustituir factura de ${editando.folio}` : editando ? `Corregir ${editando.folio}` : 'Nueva solicitud';
   const ivaOpc = [16,12,8,0];
   const ivaSel = s.iva_pct==null ? 16 : (ivaOpc.includes(Number(s.iva_pct)) ? Number(s.iva_pct) : 'otro');
   const e = s.estadia || {};
@@ -379,6 +381,7 @@ function nuevaSolicitud(src){
       <div class="campo ancho"><label class="opcion"><input type="checkbox" id="fIncl" ${s.incluye_iva?'checked':''}> El monto capturado ya incluye IVA</label></div>
       <div class="campo ancho"><div class="calculo" id="calculo"></div></div>
       <div class="campo ancho" id="dupAviso"></div>
+      ${sustituyendo ? `<div class="campo ancho"><div class="bloque aviso" style="margin:0"><b>Sustitución de factura.</b> Carga el XML y PDF de la factura nueva que emitió el proveedor. La factura anterior (${esc(editando.factura_numero||'s/n')}) queda registrada en el historial y la solicitud vuelve a pasar por autorización con el mismo folio ${esc(editando.folio)}.</div></div>` : ''}
       <div class="campo ancho"><span class="lbl">${tipoForm==='gasto'?'Justificación: ¿por qué se requiere? <i>*</i>':'Comentarios'}</span><textarea id="fJust" placeholder="${tipoForm==='gasto'?'Explica la necesidad, qué pasa si no se autoriza y el beneficio esperado':'Opcional'}">${esc(s.justificacion)}</textarea></div>
       <div class="campo ancho"><span class="lbl">NIVs o unidades relacionadas</span><textarea id="fNivs" placeholder="Uno por renglón o separados por coma">${esc((s.nivs||[]).join('\n'))}</textarea><div class="pista" id="nivPista"></div><div class="nivs" id="nivPrevio" style="margin-top:8px"></div></div>
       <div class="campo"><span class="lbl">Prioridad</span><select id="fUrg"><option ${s.urgencia!=='Urgente'?'selected':''}>Normal</option><option ${s.urgencia==='Urgente'?'selected':''}>Urgente</option></select></div>
@@ -393,7 +396,7 @@ function nuevaSolicitud(src){
         <div class="campo"><span class="lbl">Días estimados</span><input id="eDias" type="number" min="0" step="1" value="${e.dias ?? ''}"></div>
         <div class="campo ancho"><div class="calculo" id="calcEstadia"></div></div>
       </div></div>`:''}`;
-  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cancelar</button><button class="btn" data-ac="enviar" id="btnEnviar">${editando?'Reenviar a autorización':'Enviar a autorización'}</button></div>`;
+  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cancelar</button><button class="btn" data-ac="enviar" id="btnEnviar">${sustituyendo?'Guardar factura nueva y reenviar':editando?'Reenviar a autorización':'Enviar a autorización'}</button></div>`;
   bloquearXml(); recalcular(); abrir();
 }
 
@@ -443,7 +446,7 @@ async function recalcular(){
     const norm = x => String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
     const dups = estado.lista.filter(o => o.id!==editando?.id && o.tipo==='factura' && !['cancelada','rechazada'].includes(o.estado) &&
       ((uuid && norm(o.factura_uuid)===norm(uuid)) || (num && norm(o.factura_numero)===norm(num) && ((rfc && norm(o.rfc)===norm(rfc)) || (prov && norm(o.proveedor)===norm(prov))))));
-    $('dupAviso').innerHTML = dups.length ? `<div class="bloque aviso" style="margin:0"><b>Posible factura duplicada.</b> Ya existe ${dups.map(d=>esc(d.folio)).join(', ')} con el mismo dato.</div>` : '';
+    $('dupAviso').innerHTML = dups.length ? `<div class="bloque aviso" style="margin:0"><b>Posible factura duplicada.</b> Ya existe ${dups.map(d=>`${esc(d.folio)} (${esc(ESTADOS[d.estado]||d.estado)})`).join(', ')} con el mismo dato. Si esa factura la canceló el emisor, abre esa solicitud y usa «Sustituir factura» o cancélala antes de capturar la nueva.</div>` : '';
   }
   // NIVs
   const n = parseNivs($('fNivs').value);
@@ -543,7 +546,11 @@ async function enviar(){
 
   try{
     let id;
-    if(editando){
+    if(sustituyendo){
+      const { error } = await g.rpc('sustituir_factura', { p_id: editando.id, p_datos: datos });
+      if(error) throw error;
+      id = editando.id;
+    } else if(editando){
       const { error } = await g.from('solicitudes').update(datos).eq('id', editando.id);
       if(error) throw error;
       id = editando.id;
@@ -554,22 +561,24 @@ async function enviar(){
       id = data.id;
     }
     await subirArchivos(id);
-    if(editando){
+    if(sustituyendo){
+      nota(`${editando.folio}: factura sustituida y reenviada a autorización.`);
+    } else if(editando){
       const { error } = await g.rpc('reenviar', { p_id: id });
       if(error) throw error;
       nota(`${editando.folio} reenviada a autorización.`);
     } else nota('Solicitud enviada a autorización.');
-    editando = null;
+    editando = null; sustituyendo = false;
     await cargar();
     const s = estado.lista.find(x=>x.id===id);
     if(s) verDetalle(s); else cerrar();
   }catch(err){
     const msg = String(err.message||err);
     nota(msg.includes('solicitudes_uuid_unico')
-      ? 'Esa factura ya está registrada con el mismo folio fiscal.'
+      ? 'Ese folio fiscal (UUID) ya está en otra solicitud activa. Si la factura la canceló el emisor, sustitúyela o cancela esa solicitud primero.'
       : 'No se pudo guardar: ' + msg);
   }finally{
-    if($('btnEnviar')){ btn.disabled = false; btn.textContent = editando ? 'Reenviar a autorización' : 'Enviar a autorización'; }
+    if($('btnEnviar')){ btn.disabled = false; btn.textContent = sustituyendo ? 'Guardar factura nueva y reenviar' : editando ? 'Reenviar a autorización' : 'Enviar a autorización'; }
   }
 }
 async function subirArchivos(id){
@@ -767,7 +776,7 @@ document.addEventListener('click', async ev => {
   if(b){
     ev.preventDefault();
     const ac = b.dataset.ac;
-    if(ac==='cerrar') cerrar();
+    if(ac==='cerrar'){ sustituyendo = false; cerrar(); }
     if(ac==='tipo'){ tipoForm = b.dataset.v; if(tipoForm!=='factura'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; } nuevaSolicitud(editando ? {...editando, tipo:tipoForm} : {tipo:tipoForm}); }
     if(ac==='quitarXml'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; $('xmlAviso').innerHTML=''; const c=$('cajaXml'); c.classList.remove('tiene'); c.querySelector('span').textContent='Arrastra o elige el XML. Llena número, proveedor, montos, IVA y UUID.'; bloquearXml(); recalcular(); }
     if(ac==='enviar') enviar();
@@ -775,7 +784,14 @@ document.addEventListener('click', async ev => {
     if(ac==='pedirMotivo'){ claseMotivo = b.dataset.clase; $('motivo').classList.add('on'); $('motivoLbl').textContent = claseMotivo==='rechazar' ? 'Motivo del rechazo (obligatorio)' : '¿Qué se debe corregir? (obligatorio)'; $('motivoTxt').focus(); }
     if(ac==='ocultarMotivo') $('motivo').classList.remove('on');
     if(ac==='confirmarMotivo'){ const t=$('motivoTxt').value.trim(); if(t.length<5){ nota('Escribe el motivo.'); return; } accion(claseMotivo, t); }
-    if(ac==='corregir'){ const s = estado.lista.find(x=>x.id===estado.abierto?.id); if(s) nuevaSolicitud(s); }
+    if(ac==='corregir'){ const s = estado.lista.find(x=>x.id===estado.abierto?.id); if(s){ sustituyendo = false; nuevaSolicitud(s); } }
+    if(ac==='sustituir'){
+      const s = estado.lista.find(x=>x.id===estado.abierto?.id);
+      if(s && confirm(`¿Sustituir la factura ${s.factura_numero||''} de ${s.folio}?\n\nCarga la factura nueva del proveedor. La solicitud conserva su folio y vuelve a pasar por autorización.`)){
+        sustituyendo = true; archivos = {pdf:null,xml:null,xmlTexto:null};
+        nuevaSolicitud({...s, xml_datos:null});
+      }
+    }
     if(ac==='cancelar'){ if(confirm('¿Cancelar esta solicitud? Queda en el historial como cancelada.')) accion('cancelar'); }
     if(ac==='recordar') accion('recordar');
     if(ac==='copiarReporte') copiarReporte();
@@ -832,3 +848,4 @@ await cargar();
 </script>
 </body>
 </html>
+
