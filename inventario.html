@@ -114,6 +114,18 @@
   .barra i{display:block;height:100%;background:var(--c,var(--navy))}
   :root[data-tema="oscuro"] .barra i{background:var(--c,var(--lima))}
   .sin-acceso{max-width:34rem;margin:3rem auto;text-align:center}
+  .dlg{border:1px solid var(--linea);border-top:5px solid var(--lima);border-radius:8px;background:var(--sup);color:var(--tinta);
+    width:min(30rem,92vw);padding:1.25rem;font-family:'Barlow',sans-serif;box-shadow:var(--sombra)}
+  .dlg::backdrop{background:rgba(8,18,36,.55)}
+  .dlg h3{margin:0 0 .25rem;font:700 1.1rem 'Barlow',sans-serif}
+  .dlg .pie{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem}
+  .dlg .campo select,.dlg .campo textarea,.celda-rol select{font:500 .92rem 'Barlow',sans-serif;color:var(--tinta);background:var(--sup);border:1px solid var(--linea);border-radius:6px;padding:.4rem .55rem;width:100%}
+  .celda-rol select{min-width:15rem}
+  .estado{font-weight:700;font-size:.85rem}
+  .estado.pendiente{color:var(--ambar)} .estado.aprobada{color:var(--teal)} .estado.rechazada{color:var(--rojo)}
+  .acciones-fila{display:flex;gap:.35rem;flex-wrap:wrap}
+  .acciones-fila .inv-btn{padding:.35rem .6rem;font-size:.82rem}
+  .nota-caja{background:var(--sup2);border:1px solid var(--linea);border-radius:6px;padding:.7rem .9rem;margin-bottom:.9rem;font-size:.9rem;color:var(--tenue)}
 </style>
 </head>
 <body>
@@ -136,7 +148,9 @@
   <button type="button" data-vista="entregas">Entregas</button>
   <button type="button" data-vista="devoluciones">Devoluciones</button>
   <button type="button" data-vista="gps">GPS</button>
+  <button type="button" data-vista="solicitudes">Solicitudes de devolución</button>
   <button type="button" data-vista="resumen">Resumen</button>
+  <button type="button" data-vista="usuarios" id="tabUsuarios" hidden>Usuarios</button>
 </nav>
 
 <main class="inv-main">
@@ -163,6 +177,8 @@
   <section class="vista" id="v-entregas"></section>
   <section class="vista" id="v-devoluciones"></section>
   <section class="vista" id="v-gps"></section>
+  <section class="vista" id="v-solicitudes"></section>
+  <section class="vista" id="v-usuarios"></section>
   <section class="vista" id="v-resumen"><div class="resumen" id="resumen"></div></section>
 </main>
 </div>
@@ -177,6 +193,19 @@
   <div class="panel-cuerpo" id="panelCuerpo"></div>
   <div class="panel-pie" id="panelPie"></div>
 </aside>
+
+<dialog id="dlgRevisar" class="dlg">
+  <form method="dialog" id="formRevisar">
+    <h3 id="dlgTitulo">Revisar solicitud</h3>
+    <p class="tenue" id="dlgSub"></p>
+    <label class="campo" id="dlgEstatusCaja">Estatus del equipo al recibirlo
+      <select id="dlgEstatus"></select></label>
+    <label class="campo" style="margin-top:.75rem">Comentario de revisión
+      <textarea id="dlgComentario" rows="3"></textarea></label>
+    <div class="pie"><button class="inv-btn sec" value="cancelar" type="submit">Cancelar</button>
+      <button class="inv-btn" value="ok" type="submit" id="dlgOk">Confirmar</button></div>
+  </form>
+</dialog>
 
 <datalist id="dlTipoVenta"><option>ARRENDAMIENTO</option><option>RENTA PURA</option><option>FINANCIAMIENTO</option><option>CONTADO</option></datalist>
 <datalist id="dlArea"><option>HT RENT</option><option>JJ FORZA</option><option>3C</option></datalist>
@@ -208,7 +237,7 @@ const hoy  = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).t
 })();
 
 const S = {
-  nivel: null, puedeEsc: false, esAdmin: false,
+  nivel: null, puedeEsc: false, esAdmin: false, puedeSolicitar: false, solic: null,
   filas: [], filtradas: [], limite: 200,
   cat: { patios:[], eo:[], ea:[], ep:[], cl:[], mc:[] },
   abierto: null, seccion: 'datos', formulario: null, historial: [],
@@ -253,7 +282,10 @@ async function arrancar(){
   S.nivel = mod.nivel;
   S.puedeEsc = ['escritura', 'admin'].includes(mod.nivel);
   S.esAdmin = mod.nivel === 'admin';
-  $('nivelUsuario').textContent = { admin:'Inventario · administración', escritura:'Inventario · edición', lectura:'Inventario · consulta' }[mod.nivel] || '';
+  const { data: perm } = await inv.rpc('mis_permisos');
+  S.puedeSolicitar = !!perm?.puede_solicitar;
+  $('tabUsuarios').hidden = !S.esAdmin;
+  $('nivelUsuario').textContent = (S.puedeSolicitar && !S.puedeEsc) ? 'Inventario · consulta y solicitudes' : ({ admin:'Inventario · administración', escritura:'Inventario · edición', lectura:'Inventario · consulta' }[mod.nivel] || '');
 
   try {
     await Promise.all([cargarCatalogos(), cargarFilas()]);
@@ -394,7 +426,7 @@ $('exportar').onclick = () => {
     ['cliente_actual','Cliente'],['tipo_venta','Tipo de venta'],['folio_venta','Folio de venta'],['fecha_venta','Fecha de venta'],
     ['area_comercial','Área comercial'],['asesor','Asesor'],['status_reparacion','Reparación'],['gps_dispositivo','GPS'],['samsara_nombre','Samsara']];
   if (S.puedeEsc) cols.push(['costo_factura_proveedor','Costo factura'],['valor_comercial','Valor comercial'],['factura','Factura'],
-    ['fecha_factura','Fecha factura'],['medio_compra','Medio de compra'],['egreso','Egreso']);
+    ['fecha_factura','Fecha factura'],['medio_compra','Medio de compra'],['egreso','Egreso'],['estatus_administracion','Administración'],['regla_fondeo','Regla de fondeo']);
   const celda = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const csv = [cols.map(c => c[1]).join(','), ...S.filtradas.map(f => cols.map(c => celda(f[c[0]])).join(','))].join('\r\n');
   const a = document.createElement('a');
@@ -431,6 +463,7 @@ const SECCIONES = [
     { k:'fecha_venta', l:'Fecha de venta', g:'ficha', t:'fecha' },
     { k:'asesor', l:'Asesor comercial', g:'ficha' },
     { k:'comercializable', l:'Disponible para comercializar', g:'ficha', t:'bool' },
+    { k:'entrega_inmediata', l:'Entrega inmediata', g:'ficha', t:'bool' },
   ]},
   { id:'fin', t:'Financiero', soloEsc:true, campos:[
     { k:'costo_factura_proveedor', l:'Costo factura proveedor', g:'fin', t:'num' },
@@ -440,7 +473,9 @@ const SECCIONES = [
     { k:'costo_pend_registrar', l:'Costo pendiente de registrar', g:'fin', t:'num' },
     { k:'costo_pend_cobrar', l:'Costo pendiente de cobrar', g:'fin', t:'num' },
     { k:'medio_compra', l:'Medio de compra', g:'fin', t:'sel', op:opCat('mc'), ancho:true, nota:'fondeo' },
-    { k:'egreso', l:'Egreso registrado', g:'fin', t:'bool' },
+    { k:'egreso', l:'Egreso', g:'fin', t:'sel', op:() => ['SI','NO','CONSIGNA','DEVOLUCION ATRO','DEVOLUCION A JJ'].map(x => [x, x]) },
+    { k:'estatus_administracion', l:'Administración', g:'fin', t:'sel', op:() => [['Administrado por HT Rent','Administrado por HT Rent'],['No administrado por HT Rent','No administrado por HT Rent']] },
+    { k:'regla_fondeo', l:'Regla de fondeo', g:'fin', t:'sel', op:() => [['Sí cumple regla de fondeo','Sí cumple'],['No cumple regla de fondeo','No cumple']] },
   ]},
   { id:'oper', t:'Operativo', campos:[
     { k:'status_reparacion', l:'Estatus de reparación', g:'ficha', lista:'dlReparacion' },
@@ -611,6 +646,15 @@ const FORMS = {
     { k:'quien_informa', l:'Quién informa' },
     { k:'obs', l:'Observaciones', t:'area', ancho:true },
   ], nota:'Al guardar, el equipo queda libre, sin cliente y registrado en el patio que lo recibe.' },
+  solicitud: { t:'Solicitar devolución', tabla:'solicitudes_devolucion', color:'var(--ambar)', campos:[
+    { k:'posible_fecha', l:'Posible fecha de devolución', t:'fecha', req:true },
+    { k:'motivo', l:'Motivo', lista:'dlMotivo', req:true },
+    { k:'cliente', l:'Cliente', ancho:true, def:f => f.cliente_actual || '' },
+    { k:'folio_venta', l:'Folio de venta', def:f => f.folio_venta || '' },
+    { k:'patio_id', l:'Patio donde se recibiría', t:'selnum', op:opPatios, blank:true },
+    { k:'quien_informa', l:'Quién informa' },
+    { k:'comentario_solicitante', l:'Comentario', t:'area', ancho:true },
+  ], nota:'La solicitud queda pendiente hasta que Operaciones la apruebe. Al aprobarla se registra la devolución.' },
   gps: { t:'Registrar movimiento de GPS', tabla:'gps', color:'var(--azul)', campos:[
     { k:'fecha', l:'Fecha', t:'fecha', def:hoy, req:true },
     { k:'accion', l:'Acción', t:'sel', req:true, op:() => [['INSTALACION','Instalación'],['CAMBIO','Cambio de dispositivo'],['RETIRO','Retiro'],['REVISION','Revisión']] },
@@ -646,6 +690,9 @@ function pintarMovimientos(){
   const caja = $('movCaja'); if (!caja) return;
   const f = S.abierto, fm = S.formulario && FORMS[S.formulario];
   let html = '';
+  if (S.puedeSolicitar && !S.puedeEsc) {
+    html += `<div class="acciones"><button class="inv-btn ${S.formulario==='solicitud'?'':'sec'}" type="button" data-form="solicitud">Solicitar devolución</button></div>`;
+  }
   if (S.puedeEsc) {
     html += `<div class="acciones">
       <button class="inv-btn ${S.formulario==='entrega'?'':'sec'}" type="button" data-form="entrega">Registrar entrega</button>
@@ -690,6 +737,7 @@ async function registrarMovimiento(e){
   const { error } = await inv.from(fm.tabla).insert(reg);
   if (error) { aviso('No se guardó: ' + error.message); btn.disabled = false; btn.textContent = 'Guardar registro'; return; }
   delete S.listas[fm.tabla];
+  if (fm.tabla === 'solicitudes_devolucion') S.solic = null;
   S.formulario = null;
   const id = S.abierto.id;
   await refrescarFila(id);
@@ -787,6 +835,155 @@ function pintarResumen(){
     bloque('Por asignación', grupo('estatus_asignacion', k => nombreDe('ea', k)), k => colorAsig(k));
 }
 
+
+// ======================= Solicitudes de devolución =======================
+const ESTADO_TXT = { pendiente:'Pendiente', aprobada:'Aprobada', rechazada:'Rechazada' };
+async function pintarSolicitudes(){
+  const caja = $('v-solicitudes');
+  if (!caja.dataset.armada) {
+    caja.innerHTML = `
+      <div class="nota-caja">${S.puedeEsc
+        ? 'Revisa las solicitudes pendientes. Al aprobar una, se registra la devolución y el equipo cambia de estatus en toda la plataforma.'
+        : S.puedeSolicitar ? 'Para solicitar una devolución escribe el NIV y da clic en «Nueva solicitud». Operaciones la revisará.'
+        : 'Aquí puedes consultar las solicitudes de devolución y su estado.'}</div>
+      <div class="filtros">
+        <select data-estado aria-label="Estado"><option value="pendiente">Pendientes</option><option value="aprobada">Aprobadas</option><option value="rechazada">Rechazadas</option><option value="">Todas</option></select>
+        <input class="buscar" type="search" data-q placeholder="Buscar NIV, cliente, motivo…" aria-label="Buscar">
+        ${S.puedeSolicitar ? `<input type="text" data-niv placeholder="NIV del equipo" style="width:13rem" aria-label="NIV">
+        <button class="inv-btn" type="button" data-nueva>Nueva solicitud</button>` : ''}
+      </div>
+      <div class="tabla-caja"><table class="inv" data-tabla></table></div>`;
+    caja.dataset.armada = '1';
+    caja.querySelector('[data-estado]').onchange = pintarSolicitudes;
+    caja.querySelector('[data-q]').oninput = pintarSolicitudes;
+    const bn = caja.querySelector('[data-nueva]');
+    if (bn) {
+      const ir = () => {
+        const t = caja.querySelector('[data-niv]').value.trim().toUpperCase();
+        const hall = t.length >= 4 ? S.filas.filter(f => f.niv.includes(t)) : [];
+        const eq = hall.find(f => f.niv === t) || (hall.length === 1 ? hall[0] : null);
+        if (!eq) { aviso(hall.length > 1 ? `Hay ${hall.length} equipos que coinciden. Escribe más caracteres del NIV.` : 'No encontré un equipo activo con ese NIV.'); return; }
+        aviso(''); abrirEquipo(eq.id, 'mov', S.puedeEsc ? 'devolucion' : 'solicitud');
+      };
+      bn.onclick = ir;
+      caja.querySelector('[data-niv]').addEventListener('keydown', e => { if (e.key === 'Enter') ir(); });
+    }
+    caja.querySelector('[data-tabla]').addEventListener('click', e => {
+      const b = e.target.closest('button[data-rev]');
+      if (b) { revisarSolicitud(b.dataset.id, b.dataset.rev === '1'); return; }
+      const tr = e.target.closest('tr[data-eq]'); if (tr) abrirEquipo(tr.dataset.eq, 'mov');
+    });
+  }
+  if (!S.solic) {
+    const { data, error } = await inv.from('v_solicitudes').select('*').order('creado_en', { ascending:false }).limit(2000);
+    if (error) { aviso('No se pudieron leer las solicitudes: ' + error.message); return; }
+    S.solic = data;
+    const pend = data.filter(x => x.estado === 'pendiente').length;
+    document.querySelector('#pestanas [data-vista="solicitudes"]').textContent = 'Solicitudes de devolución' + (pend ? ` (${pend})` : '');
+  }
+  const est = caja.querySelector('[data-estado]').value, q = caja.querySelector('[data-q]').value.trim().toUpperCase();
+  const filas = S.solic.filter(r => (!est || r.estado === est) &&
+    (!q || [r.niv, r.cliente, r.motivo, r.folio_venta, r.solicitado_por].some(v => String(v || '').toUpperCase().includes(q))));
+  caja.querySelector('[data-tabla]').innerHTML = `<thead><tr><th>Solicitada</th><th>NIV</th><th>Equipo</th><th>Cliente</th><th>Posible fecha</th>
+      <th>Motivo</th><th>Recibe</th><th>Solicitó</th><th>Estado</th><th>${S.puedeEsc ? 'Acción' : 'Revisión'}</th></tr></thead><tbody>${
+    filas.length ? filas.map(r => `<tr data-eq="${r.equipo_id}">
+      <td>${fmtF(r.creado_en)}</td><td class="niv">${esc(r.niv)}</td><td>${esc(r.tipo || '—')}</td><td>${esc(r.cliente || '—')}</td>
+      <td>${fmtF(r.posible_fecha)}</td><td>${esc(r.motivo || '—')}</td><td>${esc(r.patio || '—')}</td><td>${esc(r.solicitado_por || '—')}</td>
+      <td><span class="estado ${r.estado}">${ESTADO_TXT[r.estado]}</span></td>
+      <td>${r.estado === 'pendiente' && S.puedeEsc
+        ? `<div class="acciones-fila"><button class="inv-btn" type="button" data-rev="1" data-id="${r.id}">Aprobar</button><button class="inv-btn sec" type="button" data-rev="0" data-id="${r.id}">Rechazar</button></div>`
+        : `<span class="tenue">${esc([r.revisado_por_nombre, r.revisado_en && fmtF(r.revisado_en), r.comentario_revision].filter(Boolean).join(' · ') || '—')}</span>`}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="10" class="vacio">${est === 'pendiente' ? 'No hay solicitudes pendientes.' : 'Ninguna solicitud coincide.'}</td></tr>`
+  }</tbody>`;
+}
+
+function revisarSolicitud(id, aprobar){
+  const r = S.solic.find(x => x.id === id); if (!r) return;
+  const dlg = $('dlgRevisar');
+  $('dlgTitulo').textContent = aprobar ? 'Aprobar solicitud de devolución' : 'Rechazar solicitud de devolución';
+  $('dlgSub').textContent = `${r.niv} · ${r.cliente || 'sin cliente'} · ${r.motivo || ''}`;
+  $('dlgEstatusCaja').style.display = aprobar ? '' : 'none';
+  $('dlgEstatus').innerHTML = ['PENDIENTE','DISPONIBLE','REPARACION','ADECUACION','RESGUARDO','FUERA_OP','SUBASTA_RB','DEVOLUCION_ATRO','DEVOLUCION_JJ']
+    .map(k => `<option value="${k}">${esc(nombreDe('eo', k))}</option>`).join('');
+  $('dlgComentario').value = '';
+  $('dlgOk').textContent = aprobar ? 'Aprobar y registrar devolución' : 'Rechazar';
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== 'ok') return;
+    const { error } = await inv.rpc('revisar_solicitud', { p_id: id, p_aprobar: aprobar,
+      p_comentario: $('dlgComentario').value.trim() || null, p_estatus_resultante: $('dlgEstatus').value });
+    if (error) { aviso('No se pudo revisar: ' + error.message); return; }
+    S.solic = null; delete S.listas.devoluciones;
+    if (aprobar) await refrescarFila(r.equipo_id);
+    await pintarSolicitudes();
+    aviso(aprobar ? `Solicitud aprobada: se registró la devolución de ${r.niv}.` : `Solicitud de ${r.niv} rechazada.`, 'ok');
+  };
+  dlg.showModal();
+}
+
+// ======================= Usuarios (solo administradores) =======================
+const ROLES_INV = [
+  ['inventario_admin', 'Administrador · acceso total, catálogos y usuarios'],
+  ['inventario_editor', 'Edición · captura y edita inventario, entregas y devoluciones'],
+  ['inventario_lectura', 'Solo lectura · consulta, no captura ni edita'],
+  ['inventario_solicitante', 'Solo lectura + solicitar devolución'],
+  ['', 'Sin acceso a Inventario']
+];
+async function pintarUsuarios(){
+  const caja = $('v-usuarios');
+  if (!S.esAdmin) { caja.innerHTML = '<p class="vacio">Solo un administrador de Inventario puede ver este menú.</p>'; return; }
+  if (!caja.dataset.armada) {
+    caja.innerHTML = `
+      <div class="nota-caja">Define qué puede hacer cada persona dentro de Inventario. Quien aparece como «Sin cuenta» recibirá este acceso en cuanto se le dé de alta en la plataforma.</div>
+      <div class="filtros">
+        <input class="buscar" type="search" data-q placeholder="Buscar nombre o correo…" aria-label="Buscar">
+        <input type="email" data-correo placeholder="correo@htrent.mx" style="width:16rem" aria-label="Correo">
+        <select data-rol aria-label="Rol">${ROLES_INV.filter(r => r[0]).map(r => `<option value="${r[0]}">${esc(r[1].split(' · ')[0])}</option>`).join('')}</select>
+        <button class="inv-btn" type="button" data-agregar>Agregar acceso</button>
+      </div>
+      <div class="tabla-caja"><table class="inv" data-tabla></table></div><div class="mas" data-mas></div>`;
+    caja.dataset.armada = '1';
+    caja.querySelector('[data-q]').oninput = () => pintarUsuarios();
+    caja.querySelector('[data-agregar]').onclick = async () => {
+      const correo = caja.querySelector('[data-correo]').value.trim();
+      if (!correo) { aviso('Escribe el correo de la persona.'); return; }
+      const { error } = await inv.rpc('asignar_acceso', { p_correo: correo, p_rol: caja.querySelector('[data-rol]').value });
+      if (error) { aviso('No se pudo agregar: ' + error.message); return; }
+      caja.querySelector('[data-correo]').value = '';
+      S.usuarios = null; await pintarUsuarios(); aviso('Acceso guardado para ' + correo + '.', 'ok');
+    };
+    caja.querySelector('[data-tabla]').addEventListener('change', async e => {
+      const sel = e.target.closest('select[data-correo]'); if (!sel) return;
+      sel.disabled = true;
+      const { error } = await inv.rpc('asignar_acceso', { p_correo: sel.dataset.correo, p_rol: sel.value || null });
+      sel.disabled = false;
+      if (error) { aviso('No se pudo cambiar: ' + error.message); S.usuarios = null; pintarUsuarios(); return; }
+      const u = S.usuarios.find(x => x.correo === sel.dataset.correo); if (u) u.rol = sel.value || null;
+      aviso('Acceso actualizado para ' + sel.dataset.correo + '.', 'ok');
+    });
+  }
+  if (!S.usuarios) {
+    const { data, error } = await inv.rpc('listar_usuarios');
+    if (error) { aviso('No se pudieron leer los usuarios: ' + error.message); return; }
+    S.usuarios = data;
+  }
+  const q = caja.querySelector('[data-q]').value.trim().toLowerCase();
+  const filas = S.usuarios.filter(u => !q || (u.nombre || '').toLowerCase().includes(q) || u.correo.includes(q));
+  const cuenta = k => S.usuarios.filter(u => (u.rol || '') === k).length;
+  caja.querySelector('[data-tabla]').innerHTML = `<thead><tr><th>Nombre</th><th>Correo</th><th>Cuenta</th><th>Último acceso</th><th>Rol en Inventario</th></tr></thead><tbody>${
+    filas.map(u => `<tr>
+      <td>${esc(u.nombre || '—')}${u.puesto ? `<div class="tenue">${esc(u.puesto)}</div>` : ''}</td>
+      <td>${esc(u.correo)}</td>
+      <td>${u.tiene_cuenta ? 'Activa' : '<span class="tenue">Sin cuenta</span>'}</td>
+      <td>${u.ultimo_acceso ? fmtF(u.ultimo_acceso) : '<span class="tenue">—</span>'}</td>
+      <td class="celda-rol"><select data-correo="${esc(u.correo)}" aria-label="Rol de ${esc(u.correo)}">${
+        ROLES_INV.map(r => `<option value="${r[0]}" ${(u.rol || '') === r[0] ? 'selected' : ''}>${esc(r[1])}</option>`).join('')}</select></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="vacio">Ningún usuario coincide.</td></tr>'
+  }</tbody>`;
+  caja.querySelector('[data-mas]').textContent =
+    `${S.usuarios.length} personas · ${cuenta('inventario_admin')} administradores · ${cuenta('inventario_editor')} con edición · ${cuenta('inventario_lectura')} solo lectura · ${cuenta('inventario_solicitante')} con solicitud de devolución`;
+}
+
 // ======================= Pestañas =======================
 $('pestanas').addEventListener('click', e => {
   const b = e.target.closest('button[data-vista]'); if (!b) return;
@@ -795,6 +992,8 @@ $('pestanas').addEventListener('click', e => {
   aviso('');
   if (LISTAS[b.dataset.vista]) pintarLista(b.dataset.vista);
   if (b.dataset.vista === 'resumen') pintarResumen();
+  if (b.dataset.vista === 'solicitudes') pintarSolicitudes();
+  if (b.dataset.vista === 'usuarios') pintarUsuarios();
 });
 
 arrancar();
