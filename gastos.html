@@ -362,6 +362,11 @@ function nuevaSolicitud(src){
         <label class="soltar" id="cajaPdf"><input type="file" id="upPdf" accept=".pdf,application/pdf"><b>${tipoForm==='factura'?'PDF de la factura':'PDF de cotización o soporte'}</b><span>Arrastra o elige el PDF. Opcional.</span></label>
       </div>
       <div id="xmlAviso"></div>
+      ${editando && (editando.adjuntos||[]).length ? `<div style="margin-top:14px">
+        <span class="lbl">Archivos ya cargados</span>
+        <div class="archivos">${editando.adjuntos.map(a=>`<span class="chip">${a.clase==='xml'?'XML':a.clase==='pdf'?'PDF':'Soporte'}<small>${esc(a.nombre)}</small>
+          <button class="btn claro chico" data-ac="quitarAdjunto" data-id="${esc(a.id)}">Quitar</button></span>`).join('')}</div>
+        <p class="pista">Quita los que ya no apliquen y sube los correctos arriba.</p></div>` : ''}
     </div>
     <div class="bloque"><div class="campos">
       ${tipoForm==='factura'?`
@@ -507,6 +512,20 @@ function tomarPdf(file){
   if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ nota('Ese archivo no es un PDF.'); return; }
   archivos.pdf = file;
   const caja = $('cajaPdf'); caja.classList.add('tiene'); caja.querySelector('span').textContent = `${file.name}, ${kb(file.size)}`;
+}
+
+async function quitarAdjunto(idAdj){
+  const a = (editando?.adjuntos||[]).find(x=>x.id===idAdj); if(!a) return;
+  if(!confirm(`¿Quitar ${a.nombre} de la solicitud ${editando.folio}?`)) return;
+  const { error: e1 } = await core.storage.from(BUCKET).remove([a.ruta]);
+  if(e1){ nota('No se pudo borrar el archivo: ' + e1.message); return; }
+  const { error: e2 } = await g.from('adjuntos').delete().eq('id', idAdj);
+  if(e2){ nota('No se pudo quitar el archivo: ' + e2.message); return; }
+  editando = { ...editando, adjuntos: (editando.adjuntos||[]).filter(x=>x.id!==idAdj) };
+  const i = estado.lista.findIndex(x=>x.id===editando.id);
+  if(i>=0) estado.lista[i] = editando;
+  nota('Archivo retirado. Sube el correcto antes de reenviar.');
+  nuevaSolicitud(editando);
 }
 
 /* ------- guardar ------- */
@@ -770,6 +789,7 @@ document.addEventListener('click', async ev => {
     if(ac==='cerrar') cerrar();
     if(ac==='tipo'){ tipoForm = b.dataset.v; if(tipoForm!=='factura'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; } nuevaSolicitud(editando ? {...editando, tipo:tipoForm} : {tipo:tipoForm}); }
     if(ac==='quitarXml'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; $('xmlAviso').innerHTML=''; const c=$('cajaXml'); c.classList.remove('tiene'); c.querySelector('span').textContent='Arrastra o elige el XML. Llena número, proveedor, montos, IVA y UUID.'; bloquearXml(); recalcular(); }
+    if(ac==='quitarAdjunto') quitarAdjunto(b.dataset.id);
     if(ac==='enviar') enviar();
     if(ac==='autorizar') accion('autorizar');
     if(ac==='pedirMotivo'){ claseMotivo = b.dataset.clase; $('motivo').classList.add('on'); $('motivoLbl').textContent = claseMotivo==='rechazar' ? 'Motivo del rechazo (obligatorio)' : '¿Qué se debe corregir? (obligatorio)'; $('motivoTxt').focus(); }
