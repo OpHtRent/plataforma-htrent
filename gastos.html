@@ -693,14 +693,17 @@ function cuerpoReporte(lista, l){
   ${detalle}</div>`;
 }
 
-async function verConcentrado(){
-  const lista = estado.lista.filter(s=>s.estado==='autorizada')
+async function verConcentrado(seleccion){
+  if(!Array.isArray(seleccion)) seleccion = undefined;
+  const todas = estado.lista.filter(s=>s.estado==='autorizada')
     .sort((a,b)=>(b.urgencia==='Urgente')-(a.urgencia==='Urgente') || String(a.folio).localeCompare(String(b.folio)));
+  estado.seleccion = seleccion ?? (estado.seleccion && estado.seleccion.length ? estado.seleccion.filter(id=>todas.some(s=>s.id===id)) : todas.map(s=>s.id));
+  const lista = todas.filter(s=>estado.seleccion.includes(s.id))
   const l = siguienteCorte(new Date());
   estado.abierto = {tipo:'concentrado'};
   $('panelTitulo').textContent = 'Concentrado para pagos';
-  if(!lista.length){
-    $('panelCuerpo').innerHTML = `<div class="bloque"><h3>No hay nada por enviar</h3><p class="q">Ninguna solicitud autorizada está pendiente de enviarse a pagos.</p></div>`;
+  if(!todas.length){
+    $('panelCuerpo').innerHTML = `<div class="bloque"><h3>No hay nada por enviar</h3><p class="q">Ninguna factura autorizada está pendiente de enviarse a pagos.</p></div>`;
     $('panelPie').innerHTML = ''; abrir(); return;
   }
   const total = lista.reduce((a,s)=>a+Number(s.total||0),0);
@@ -721,8 +724,20 @@ async function verConcentrado(){
       <div class="archivos" id="archivosLote">${conArchivos.map(a=>`<a class="chip" href="#" data-ver-lote="${a.id}">${esc(a.folio)} · ${a.clase.toUpperCase()}<small>${esc(a.nombre)}</small></a>`).join('')}</div>
       <p class="pista">Cada botón abre el archivo en otra pestaña para que lo guardes y lo adjuntes al correo.</p></div>`
       :'<div class="bloque"><p class="q">Ninguna de estas solicitudes trae archivos adjuntos.</p></div>'}
+    <div class="bloque"><h3>Qué se incluye en este envío (${lista.length} de ${todas.length})</h3>
+      <p class="pista">Desmarca lo que no deba pagarse todavía. Lo que dejes fuera se queda autorizado y entra solo en el siguiente corte.</p>
+      <div class="acciones" style="margin:10px 0"><button class="btn claro chico" data-ac="selTodas">Marcar todas</button><button class="btn claro chico" data-ac="selNinguna">Desmarcar todas</button></div>
+      <div class="resultados"><table><tbody>${todas.map(s=>`<tr>
+        <td style="width:36px"><input type="checkbox" data-sel="${esc(s.id)}" ${estado.seleccion.includes(s.id)?'checked':''}></td>
+        <td class="niv"><b>${esc(s.folio)}</b></td>
+        <td>${esc(s.proveedor||s.gasto_tipo||'')}<span class="sub">${esc(s.concepto)}</span></td>
+        <td class="num">${money(s.total)}</td>
+        <td>${s.urgencia==='Urgente'?'<span class="sello mal">urgente</span>':''}</td>
+      </tr>`).join('')}</tbody></table></div>
+      <div class="calculo" style="margin-top:12px"><span>Seleccionadas <b>${lista.length}</b></span><span>Total del envío <b>${money(total)}</b></span></div>
+    </div>
     <div class="bloque"><h3>Así se verá el correo</h3><div id="reporteHTML">${cuerpo}</div></div>`;
-  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cerrar</button><button class="btn navy" data-ac="marcarEnviadas">Marcar como enviadas a pagos</button></div>`;
+  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cerrar</button><button class="btn navy" data-ac="marcarEnviadas">Marcar ${lista.length===todas.length?'todas':`las ${lista.length} seleccionadas`} como enviadas</button></div>`;
   estado.reporte = {lista, asunto, cuerpo, total, pago:l.pago};
   abrir();
 }
@@ -767,12 +782,19 @@ async function abrirArchivoLote(id){
   window.open(data.signedUrl, '_blank', 'noopener');
 }
 async function marcarEnviadas(){
-  const n = estado.reporte?.lista?.length || 0;
-  if(!confirm(`¿Marcar ${n} ${n===1?'solicitud':'solicitudes'} como enviadas a pagos? Hazlo solo después de mandar el correo.`)) return;
-  const { data, error } = await g.rpc('enviar_lote_manual');
+  const sel = estado.reporte?.lista || [];
+  const n = sel.length;
+  if(!n){ nota('No hay facturas seleccionadas.'); return; }
+  const todas = estado.lista.filter(s=>s.estado==='autorizada').length;
+  const parcial = n < todas;
+  if(!confirm(`¿Marcar ${n} ${n===1?'factura':'facturas'} como enviadas a pagos?${parcial?` Las otras ${todas-n} se quedan para el siguiente corte.`:''} Hazlo solo después de mandar el correo.`)) return;
+  const { data, error } = parcial
+    ? await g.rpc('enviar_seleccionadas', { p_ids: sel.map(s=>s.id) })
+    : await g.rpc('enviar_lote_manual');
   if(error){ nota('No se pudo marcar el lote: ' + error.message); return; }
   const r = Array.isArray(data) ? data[0] : data;
   nota(`Lote enviado: ${r?.num_solicitudes ?? n} ${(r?.num_solicitudes ?? n)===1?'solicitud':'solicitudes'} por ${money(r?.total ?? 0)}.`);
+  estado.seleccion = null;
   await cargar(); cerrar();
 }
 
@@ -803,6 +825,8 @@ document.addEventListener('click', async ev => {
     if(ac==='csvReporte') csvReporte();
     if(ac==='imprimirReporte') imprimirReporte();
     if(ac==='marcarEnviadas') marcarEnviadas();
+    if(ac==='selTodas') verConcentrado(estado.lista.filter(s=>s.estado==='autorizada').map(s=>s.id));
+    if(ac==='selNinguna') verConcentrado([]);
     return;
   }
   const fila = ev.target.closest('tr.fila') || ev.target.closest('[data-id]');
@@ -812,6 +836,12 @@ document.addEventListener('click', async ev => {
 });
 document.addEventListener('change', ev => {
   const t = ev.target;
+  if(t.dataset && t.dataset.sel){
+    const sel = new Set(estado.seleccion || []);
+    if(t.checked) sel.add(t.dataset.sel); else sel.delete(t.dataset.sel);
+    verConcentrado([...sel]);
+    return;
+  }
   if(t.id==='upXml' && t.files[0]) tomarXml(t.files[0]);
   if(t.id==='upPdf' && t.files[0]) tomarPdf(t.files[0]);
   if(estado.abierto?.tipo==='forma' && t.closest('#panelCuerpo')){
@@ -834,7 +864,7 @@ document.addEventListener('keydown', ev => { if(ev.key==='Escape' && $('panel').
 $('telon').addEventListener('click', cerrar);
 $('cerrar').addEventListener('click', cerrar);
 $('nueva').addEventListener('click', () => nuevaSolicitud(null));
-$('concentrado').addEventListener('click', verConcentrado);
+$('concentrado').addEventListener('click', () => verConcentrado());
 $('q').addEventListener('input', e => { estado.q = e.target.value; pintar(); });
 $('fTipo').addEventListener('change', e => { estado.fTipo = e.target.value; pintar(); });
 $('fEstado').addEventListener('change', e => { estado.fEstado = e.target.value; pintar(); });
