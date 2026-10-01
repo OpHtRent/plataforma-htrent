@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Saira:ital,wght@1,700;1,800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="ht.css?v=2026-09-25b">
+<link rel="stylesheet" href="ht.css?v=2026-09-30a">
 </head>
 <body>
 
@@ -28,7 +28,7 @@
 </header>
 
 <main>
-  <a class="migaja" href="index.html?v=2026-09-25b">← Volver a módulos</a>
+  <a class="migaja" href="index.html?v=2026-09-30a">← Volver a módulos</a>
   <h1 id="titulo">Autorización de gastos y facturas</h1>
   <span class="eyebrow" id="subtitulo">Operaciones · corte lunes y miércoles a las 12:00</span>
 
@@ -96,7 +96,7 @@ const estado = { yo:null, lista:[], personas:{}, proveedores:[], tab:'pend', q:'
 
 /* ---------------- arranque ---------------- */
 const { data:{ session } } = await core.auth.getSession();
-if(!session){ location.href = 'index.html?v=2026-09-25b'; }
+if(!session){ location.href = 'index.html?v=2026-09-30a'; }
 const usuario = session.user;
 
 const { data: perfil } = await core.from('perfiles').select('nombre,puesto').eq('id', usuario.id).maybeSingle();
@@ -362,6 +362,11 @@ function nuevaSolicitud(src){
         <label class="soltar" id="cajaPdf"><input type="file" id="upPdf" accept=".pdf,application/pdf"><b>${tipoForm==='factura'?'PDF de la factura':'PDF de cotización o soporte'}</b><span>Arrastra o elige el PDF. Opcional.</span></label>
       </div>
       <div id="xmlAviso"></div>
+      ${editando && (editando.adjuntos||[]).length ? `<div style="margin-top:14px">
+        <span class="lbl">Archivos ya cargados</span>
+        <div class="archivos">${editando.adjuntos.map(a=>`<span class="chip">${a.clase==='xml'?'XML':a.clase==='pdf'?'PDF':'Soporte'}<small>${esc(a.nombre)}</small>
+          <button class="btn claro chico" data-ac="quitarAdjunto" data-id="${esc(a.id)}">Quitar</button></span>`).join('')}</div>
+        <p class="pista">Quita los que ya no apliquen y sube los correctos arriba.</p></div>` : ''}
     </div>
     <div class="bloque"><div class="campos">
       ${tipoForm==='factura'?`
@@ -507,6 +512,20 @@ function tomarPdf(file){
   if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ nota('Ese archivo no es un PDF.'); return; }
   archivos.pdf = file;
   const caja = $('cajaPdf'); caja.classList.add('tiene'); caja.querySelector('span').textContent = `${file.name}, ${kb(file.size)}`;
+}
+
+async function quitarAdjunto(idAdj){
+  const a = (editando?.adjuntos||[]).find(x=>x.id===idAdj); if(!a) return;
+  if(!confirm(`¿Quitar ${a.nombre} de la solicitud ${editando.folio}?`)) return;
+  const { error: e1 } = await core.storage.from(BUCKET).remove([a.ruta]);
+  if(e1){ nota('No se pudo borrar el archivo: ' + e1.message); return; }
+  const { error: e2 } = await g.from('adjuntos').delete().eq('id', idAdj);
+  if(e2){ nota('No se pudo quitar el archivo: ' + e2.message); return; }
+  editando = { ...editando, adjuntos: (editando.adjuntos||[]).filter(x=>x.id!==idAdj) };
+  const i = estado.lista.findIndex(x=>x.id===editando.id);
+  if(i>=0) estado.lista[i] = editando;
+  nota('Archivo retirado. Sube el correcto antes de reenviar.');
+  nuevaSolicitud(editando);
 }
 
 /* ------- guardar ------- */
@@ -674,14 +693,17 @@ function cuerpoReporte(lista, l){
   ${detalle}</div>`;
 }
 
-async function verConcentrado(){
-  const lista = estado.lista.filter(s=>s.estado==='autorizada')
+async function verConcentrado(seleccion){
+  if(!Array.isArray(seleccion)) seleccion = undefined;
+  const todas = estado.lista.filter(s=>s.estado==='autorizada')
     .sort((a,b)=>(b.urgencia==='Urgente')-(a.urgencia==='Urgente') || String(a.folio).localeCompare(String(b.folio)));
+  estado.seleccion = seleccion ?? (estado.seleccion && estado.seleccion.length ? estado.seleccion.filter(id=>todas.some(s=>s.id===id)) : todas.map(s=>s.id));
+  const lista = todas.filter(s=>estado.seleccion.includes(s.id))
   const l = siguienteCorte(new Date());
   estado.abierto = {tipo:'concentrado'};
   $('panelTitulo').textContent = 'Concentrado para pagos';
-  if(!lista.length){
-    $('panelCuerpo').innerHTML = `<div class="bloque"><h3>No hay nada por enviar</h3><p class="q">Ninguna solicitud autorizada está pendiente de enviarse a pagos.</p></div>`;
+  if(!todas.length){
+    $('panelCuerpo').innerHTML = `<div class="bloque"><h3>No hay nada por enviar</h3><p class="q">Ninguna factura autorizada está pendiente de enviarse a pagos.</p></div>`;
     $('panelPie').innerHTML = ''; abrir(); return;
   }
   const total = lista.reduce((a,s)=>a+Number(s.total||0),0);
@@ -700,10 +722,23 @@ async function verConcentrado(){
     </div>
     ${conArchivos.length?`<div class="bloque"><h3>Archivos por adjuntar (${conArchivos.length})</h3>
       <div class="archivos" id="archivosLote">${conArchivos.map(a=>`<a class="chip" href="#" data-ver-lote="${a.id}">${esc(a.folio)} · ${a.clase.toUpperCase()}<small>${esc(a.nombre)}</small></a>`).join('')}</div>
-      <p class="pista">Cada botón abre el archivo en otra pestaña para que lo guardes y lo adjuntes al correo.</p></div>`
+      <div class="acciones" style="margin-top:12px"><button class="btn" data-ac="zipArchivos" id="btnZip">Descargar todos en un ZIP (${conArchivos.length})</button></div>
+      <p class="pista">El ZIP trae el PDF y el XML de cada factura, nombrados con su folio, más el resumen en Excel.</p></div>`
       :'<div class="bloque"><p class="q">Ninguna de estas solicitudes trae archivos adjuntos.</p></div>'}
+    <div class="bloque"><h3>Qué se incluye en este envío (${lista.length} de ${todas.length})</h3>
+      <p class="pista">Desmarca lo que no deba pagarse todavía. Lo que dejes fuera se queda autorizado y entra solo en el siguiente corte.</p>
+      <div class="acciones" style="margin:10px 0"><button class="btn claro chico" data-ac="selTodas">Marcar todas</button><button class="btn claro chico" data-ac="selNinguna">Desmarcar todas</button></div>
+      <div class="resultados"><table><tbody>${todas.map(s=>`<tr>
+        <td style="width:36px"><input type="checkbox" data-sel="${esc(s.id)}" ${estado.seleccion.includes(s.id)?'checked':''}></td>
+        <td class="niv"><b>${esc(s.folio)}</b></td>
+        <td>${esc(s.proveedor||s.gasto_tipo||'')}<span class="sub">${esc(s.concepto)}</span></td>
+        <td class="num">${money(s.total)}</td>
+        <td>${s.urgencia==='Urgente'?'<span class="sello mal">urgente</span>':''}</td>
+      </tr>`).join('')}</tbody></table></div>
+      <div class="calculo" style="margin-top:12px"><span>Seleccionadas <b>${lista.length}</b></span><span>Total del envío <b>${money(total)}</b></span></div>
+    </div>
     <div class="bloque"><h3>Así se verá el correo</h3><div id="reporteHTML">${cuerpo}</div></div>`;
-  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cerrar</button><button class="btn navy" data-ac="marcarEnviadas">Marcar como enviadas a pagos</button></div>`;
+  $('panelPie').innerHTML = `<div class="panel-pie"><button class="btn claro" data-ac="cerrar">Cerrar</button><button class="btn navy" data-ac="marcarEnviadas">Marcar ${lista.length===todas.length?'todas':`las ${lista.length} seleccionadas`} como enviadas</button></div>`;
   estado.reporte = {lista, asunto, cuerpo, total, pago:l.pago};
   abrir();
 }
@@ -735,6 +770,56 @@ function csvReporte(){
   a.href = url; a.download = `Resumen_pagos_${new Date().toISOString().slice(0,10)}.csv`;
   a.click(); setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
+function cargarJSZip(){
+  if(window.JSZip) return Promise.resolve();
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload=res; s.onerror=()=>rej(new Error('No se pudo cargar el empaquetador. Revisa tu conexión.'));
+    document.head.appendChild(s);
+  });
+}
+async function zipArchivos(){
+  const lista = estado.reporte?.lista || [];
+  const archivos = lista.flatMap(s=>(s.adjuntos||[]).map(a=>({...a, folio:s.folio, proveedor:s.proveedor||''})));
+  if(!archivos.length){ nota('Estas facturas no traen archivos.'); return; }
+  const btn = $('btnZip'); if(btn){ btn.disabled = true; btn.textContent = 'Preparando…'; }
+  try{
+    await cargarJSZip();
+    const zip = new JSZip();
+    let listos = 0, fallidos = [];
+    for(const a of archivos){
+      if(btn) btn.textContent = `Descargando ${listos+1} de ${archivos.length}…`;
+      const { data, error } = await core.storage.from(BUCKET).createSignedUrl(a.ruta, 600);
+      if(error || !data?.signedUrl){ fallidos.push(a.nombre); continue; }
+      try{
+        const r = await fetch(data.signedUrl);
+        if(!r.ok) throw new Error(r.status);
+        const ext = (a.nombre.match(/\.[A-Za-z0-9]+$/)||[a.clase==='xml'?'.xml':'.pdf'])[0];
+        const base = a.nombre.replace(/\.[A-Za-z0-9]+$/,'').replace(/[^\w\-\. ]/g,'_');
+        zip.file(`${a.folio}_${a.clase.toUpperCase()}_${base}${ext}`, await r.blob());
+        listos++;
+      }catch(e){ fallidos.push(a.nombre); }
+    }
+    // resumen en Excel dentro del mismo ZIP
+    const col = v => `"${String(v ?? '').replace(/"/g,'""')}"`;
+    const filas = [['Folio','Proveedor','RFC','No. factura','UUID','Concepto','Subtotal','IVA','Total','Solicita','Autorizada'],
+      ...lista.map(s=>[s.folio, s.proveedor, s.rfc, s.factura_numero, s.factura_uuid, s.concepto,
+        s.subtotal, s.iva, s.total, s.solicitante_nombre, fHora(s.autorizado_en)])];
+    zip.file(`Resumen_pagos_${new Date().toISOString().slice(0,10)}.csv`,
+      '\uFEFF' + filas.map(r=>r.map(col).join(',')).join('\r\n'));
+
+    if(btn) btn.textContent = 'Comprimiendo…';
+    const blob = await zip.generateAsync({ type:'blob' });
+    const url = URL.createObjectURL(blob);
+    const a2 = document.createElement('a');
+    a2.href = url; a2.download = `Facturas_pago_${new Date().toISOString().slice(0,10)}.zip`;
+    a2.click(); setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    nota(fallidos.length ? `ZIP listo con ${listos} archivos. No se pudieron bajar: ${fallidos.join(', ')}` : `ZIP listo con ${listos} archivos.`);
+  }catch(e){ nota(e.message || 'No se pudo armar el ZIP.'); }
+  finally{ if($('btnZip')){ btn.disabled=false; btn.textContent = `Descargar todos en un ZIP (${archivos.length})`; } }
+}
+
 function imprimirReporte(){
   const v = window.open('', '_blank');
   if(!v){ nota('El navegador bloqueó la ventana. Permite las ventanas emergentes.'); return; }
@@ -748,12 +833,19 @@ async function abrirArchivoLote(id){
   window.open(data.signedUrl, '_blank', 'noopener');
 }
 async function marcarEnviadas(){
-  const n = estado.reporte?.lista?.length || 0;
-  if(!confirm(`¿Marcar ${n} ${n===1?'solicitud':'solicitudes'} como enviadas a pagos? Hazlo solo después de mandar el correo.`)) return;
-  const { data, error } = await g.rpc('enviar_lote_manual');
+  const sel = estado.reporte?.lista || [];
+  const n = sel.length;
+  if(!n){ nota('No hay facturas seleccionadas.'); return; }
+  const todas = estado.lista.filter(s=>s.estado==='autorizada').length;
+  const parcial = n < todas;
+  if(!confirm(`¿Marcar ${n} ${n===1?'factura':'facturas'} como enviadas a pagos?${parcial?` Las otras ${todas-n} se quedan para el siguiente corte.`:''} Hazlo solo después de mandar el correo.`)) return;
+  const { data, error } = parcial
+    ? await g.rpc('enviar_seleccionadas', { p_ids: sel.map(s=>s.id) })
+    : await g.rpc('enviar_lote_manual');
   if(error){ nota('No se pudo marcar el lote: ' + error.message); return; }
   const r = Array.isArray(data) ? data[0] : data;
   nota(`Lote enviado: ${r?.num_solicitudes ?? n} ${(r?.num_solicitudes ?? n)===1?'solicitud':'solicitudes'} por ${money(r?.total ?? 0)}.`);
+  estado.seleccion = null;
   await cargar(); cerrar();
 }
 
@@ -770,6 +862,7 @@ document.addEventListener('click', async ev => {
     if(ac==='cerrar') cerrar();
     if(ac==='tipo'){ tipoForm = b.dataset.v; if(tipoForm!=='factura'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; } nuevaSolicitud(editando ? {...editando, tipo:tipoForm} : {tipo:tipoForm}); }
     if(ac==='quitarXml'){ xmlDatos=null; archivos.xml=null; archivos.xmlTexto=null; $('xmlAviso').innerHTML=''; const c=$('cajaXml'); c.classList.remove('tiene'); c.querySelector('span').textContent='Arrastra o elige el XML. Llena número, proveedor, montos, IVA y UUID.'; bloquearXml(); recalcular(); }
+    if(ac==='quitarAdjunto') quitarAdjunto(b.dataset.id);
     if(ac==='enviar') enviar();
     if(ac==='autorizar') accion('autorizar');
     if(ac==='pedirMotivo'){ claseMotivo = b.dataset.clase; $('motivo').classList.add('on'); $('motivoLbl').textContent = claseMotivo==='rechazar' ? 'Motivo del rechazo (obligatorio)' : '¿Qué se debe corregir? (obligatorio)'; $('motivoTxt').focus(); }
@@ -781,8 +874,11 @@ document.addEventListener('click', async ev => {
     if(ac==='copiarReporte') copiarReporte();
     if(ac==='copiarAsunto'){ navigator.clipboard.writeText(estado.reporte?.asunto||'').then(()=>nota('Asunto copiado.')).catch(()=>prompt('Copia el asunto:', estado.reporte?.asunto||'')); }
     if(ac==='csvReporte') csvReporte();
+    if(ac==='zipArchivos') zipArchivos();
     if(ac==='imprimirReporte') imprimirReporte();
     if(ac==='marcarEnviadas') marcarEnviadas();
+    if(ac==='selTodas') verConcentrado(estado.lista.filter(s=>s.estado==='autorizada').map(s=>s.id));
+    if(ac==='selNinguna') verConcentrado([]);
     return;
   }
   const fila = ev.target.closest('tr.fila') || ev.target.closest('[data-id]');
@@ -792,6 +888,12 @@ document.addEventListener('click', async ev => {
 });
 document.addEventListener('change', ev => {
   const t = ev.target;
+  if(t.dataset && t.dataset.sel){
+    const sel = new Set(estado.seleccion || []);
+    if(t.checked) sel.add(t.dataset.sel); else sel.delete(t.dataset.sel);
+    verConcentrado([...sel]);
+    return;
+  }
   if(t.id==='upXml' && t.files[0]) tomarXml(t.files[0]);
   if(t.id==='upPdf' && t.files[0]) tomarPdf(t.files[0]);
   if(estado.abierto?.tipo==='forma' && t.closest('#panelCuerpo')){
@@ -814,11 +916,11 @@ document.addEventListener('keydown', ev => { if(ev.key==='Escape' && $('panel').
 $('telon').addEventListener('click', cerrar);
 $('cerrar').addEventListener('click', cerrar);
 $('nueva').addEventListener('click', () => nuevaSolicitud(null));
-$('concentrado').addEventListener('click', verConcentrado);
+$('concentrado').addEventListener('click', () => verConcentrado());
 $('q').addEventListener('input', e => { estado.q = e.target.value; pintar(); });
 $('fTipo').addEventListener('change', e => { estado.fTipo = e.target.value; pintar(); });
 $('fEstado').addEventListener('change', e => { estado.fEstado = e.target.value; pintar(); });
-$('salir').addEventListener('click', async () => { await core.auth.signOut(); location.href = 'index.html?v=2026-09-25b'; });
+$('salir').addEventListener('click', async () => { await core.auth.signOut(); location.href = 'index.html?v=2026-09-30a'; });
 
 if(SOLO_FACTURAS){
   document.title = 'Autorización de facturas · Plataforma HT';
